@@ -122,6 +122,19 @@ class SARMEncodingProcessorStep(ProcessorStep):
         self.verbs = ["move", "grasp", "rotate", "push", "pull", "slide", "lift", "place"]
         self.fake = Faker()
 
+    def _clip_output_to_tensor(self, output: Any, *, call_name: str) -> torch.Tensor:
+        if isinstance(output, torch.Tensor):
+            return output
+        for attr in ("image_embeds", "text_embeds", "pooler_output"):
+            value = getattr(output, attr, None)
+            if isinstance(value, torch.Tensor):
+                return value
+        if hasattr(output, "to_tuple"):
+            for value in output.to_tuple():
+                if isinstance(value, torch.Tensor):
+                    return value
+        raise TypeError(f"CLIP {call_name} returned an unsupported output type: {type(output).__name__}")
+
     def _find_episode_for_frame(self, frame_idx: int) -> int:
         """Find the episode index for a given frame index."""
         for ep_idx in range(len(self.dataset_meta.episodes)):
@@ -454,14 +467,12 @@ class SARMEncodingProcessorStep(ProcessorStep):
             inputs = self.clip_processor(images=batch_imgs, return_tensors="pt")
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
-            # Get image embeddings
-            # transformers 5.x returns BaseModelOutputWithPooling instead of a plain tensor
-            output = self.clip_model.get_image_features(**inputs)
-            if not isinstance(output, torch.Tensor):
-                output = output.pooler_output
-                if output is None:
-                    raise ValueError("pooler_output should not be None for CLIP models.")
-            embeddings = output.detach().cpu()
+            # Some transformers versions return a tensor here, while others
+            # return a ModelOutput-like object.
+            embeddings = self._clip_output_to_tensor(
+                self.clip_model.get_image_features(**inputs), call_name="get_image_features"
+            )
+            embeddings = embeddings.detach().cpu()
 
             # Handle single frame case
             if embeddings.dim() == 1:
@@ -488,13 +499,9 @@ class SARMEncodingProcessorStep(ProcessorStep):
         inputs = self.clip_processor.tokenizer([text], return_tensors="pt", padding=True, truncation=True)
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
-        # transformers 5.x returns BaseModelOutputWithPooling instead of a plain tensor
-        output = self.clip_model.get_text_features(**inputs)
-        if not isinstance(output, torch.Tensor):
-            output = output.pooler_output
-            if output is None:
-                raise ValueError("pooler_output should not be None for CLIP models.")
-        text_embedding = output.detach().cpu()
+        text_embedding = self._clip_output_to_tensor(
+            self.clip_model.get_text_features(**inputs), call_name="get_text_features"
+        ).detach().cpu()
         text_embedding = text_embedding.expand(batch_size, -1)
 
         return text_embedding

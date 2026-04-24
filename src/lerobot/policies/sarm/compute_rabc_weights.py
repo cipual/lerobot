@@ -49,7 +49,11 @@ import argparse
 import logging
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.gridspec as gridspec
+import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 import numpy as np
 import pyarrow as pa
@@ -62,6 +66,25 @@ from lerobot.datasets import LeRobotDataset
 from .modeling_sarm import SARMRewardModel
 from .processor_sarm import make_sarm_pre_post_processors
 from .sarm_utils import normalize_stage_tau
+
+
+def configure_matplotlib_fonts():
+    """Use a non-interactive backend and a CJK-capable font when available."""
+    preferred_fonts = [
+        "Noto Sans CJK SC",
+        "Noto Sans CJK JP",
+        "WenQuanYi Zen Hei",
+        "SimHei",
+        "Microsoft YaHei",
+        "Arial Unicode MS",
+        "DejaVu Sans",
+    ]
+    available_fonts = {font.name for font in fm.fontManager.ttflist}
+    for font_name in preferred_fonts:
+        if font_name in available_fonts:
+            plt.rcParams["font.family"] = font_name
+            break
+    plt.rcParams["axes.unicode_minus"] = False
 
 
 def get_reward_model_path_from_parquet(parquet_path: Path) -> str | None:
@@ -778,7 +801,6 @@ Examples:
         "--push-to-hub",
         action="store_true",
         help="Upload progress file to the dataset repo on HuggingFace Hub",
-        default=True,
     )
     parser.add_argument(
         "--stride",
@@ -789,6 +811,7 @@ Examples:
 
     args = parser.parse_args()
 
+    configure_matplotlib_fonts()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     # Try to get reward_model_path from parquet metadata if not provided
